@@ -3,8 +3,8 @@ import csv
 from datetime import datetime
 
 # Replace these with the real URLs to your station_status and station_information endpoints
-STATION_STATUS_URL = 'https://example.com/station_status.json'
-STATION_INFO_URL = 'https://example.com/station_information.json'
+STATION_STATUS_URL = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_status'
+STATION_INFO_URL = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_information'
 
 def main():
     # 1. Fetch JSON from the two endpoints
