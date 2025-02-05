@@ -1,280 +1,221 @@
-{
-  "nbformat": 4,
-  "nbformat_minor": 0,
-  "metadata": {
-    "colab": {
-      "provenance": [],
-      "authorship_tag": "ABX9TyOjJtmf+RUqdt2BbhjmVeL1",
-      "include_colab_link": true
-    },
-    "kernelspec": {
-      "name": "python3",
-      "display_name": "Python 3"
-    },
-    "language_info": {
-      "name": "python"
+def main():
+    import sys
+    if 'google.colab' in sys.modules:
+        get_ipython().system('pip install --quiet tqdm')
+
+    import pandas as pd
+    import numpy as np
+    from datetime import datetime
+    from math import radians, sin, cos, asin, sqrt
+    from tqdm import tqdm
+
+    # Enable progress bars in Pandas
+    tqdm.pandas()
+
+    ############################################################################
+    # 1) CONFIG & LOOKUP TABLES
+    ############################################################################
+    TRIPS_CSV = '/content/Bike share ridership 2024-07.csv'
+    STATION_INFO_JSON = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_information'
+    WEATHER_FILES = {
+        "TORONTO_CITY": "weather_toronto_city.csv",
+        "TORONTO_CITY_CENTRE": "weather_toronto_citycentre.csv",
+        "TORONTO_INTL_A": "weather_toronto_intl_a.csv",
+        "TORONTO_NORTH_YORK": "weather_toronto_northyork.csv"
     }
-  },
-  "cells": [
-    {
-      "cell_type": "markdown",
-      "metadata": {
-        "id": "view-in-github",
-        "colab_type": "text"
-      },
-      "source": [
-        "<a href=\"https://colab.research.google.com/github/emilyberlinghoff/bike/blob/main/regression_data.py\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
-      ]
-    },
-    {
-      "cell_type": "code",
-      "execution_count": 6,
-      "metadata": {
-        "colab": {
-          "base_uri": "https://localhost:8080/"
-        },
-        "id": "8uQlcwEMQbwk",
-        "outputId": "a33ab0df-01cf-499f-ee32-daa8860930bc"
-      },
-      "outputs": [
-        {
-          "output_type": "stream",
-          "name": "stderr",
-          "text": [
-            "100%|██████████| 899615/899615 [30:20<00:00, 494.26it/s]\n"
-          ]
-        },
-        {
-          "output_type": "stream",
-          "name": "stdout",
-          "text": [
-            "Success! Created 'merged_bikeshare_with_weather.csv'. Unnecessary station info was removed prior to merging for efficiency.\n"
-          ]
-        }
-      ],
-      "source": [
-        "def main():\n",
-        "    import sys\n",
-        "    if 'google.colab' in sys.modules:\n",
-        "        get_ipython().system('pip install --quiet tqdm')\n",
-        "\n",
-        "    import pandas as pd\n",
-        "    import numpy as np\n",
-        "    from datetime import datetime\n",
-        "    from math import radians, sin, cos, asin, sqrt\n",
-        "    from tqdm import tqdm\n",
-        "\n",
-        "    # Enable progress bars in Pandas\n",
-        "    tqdm.pandas()\n",
-        "\n",
-        "    ############################################################################\n",
-        "    # 1) CONFIG & LOOKUP TABLES\n",
-        "    ############################################################################\n",
-        "    TRIPS_CSV = '/content/Bike share ridership 2024-09.csv'\n",
-        "    STATION_INFO_JSON = 'https://tor.publicbikesystem.net/ube/gbfs/v1/en/station_information'\n",
-        "    WEATHER_FILES = {\n",
-        "        \"TORONTO_CITY\": \"weather_toronto_city.csv\",\n",
-        "        \"TORONTO_CITY_CENTRE\": \"weather_toronto_citycentre.csv\",\n",
-        "        \"TORONTO_INTL_A\": \"weather_toronto_intl_a.csv\",\n",
-        "        \"TORONTO_NORTH_YORK\": \"weather_toronto_northyork.csv\"\n",
-        "    }\n",
-        "\n",
-        "    REGION_COORDS = {\n",
-        "        \"TORONTO_CITY\": (43.6667, -79.4000),\n",
-        "        \"TORONTO_CITY_CENTRE\": (43.6275, -79.3961),\n",
-        "        \"TORONTO_INTL_A\": (43.6767, -79.6310),\n",
-        "        \"TORONTO_NORTH_YORK\": (43.7800, -79.4678)\n",
-        "    }\n",
-        "\n",
-        "    # Convert numeric Month → word\n",
-        "    MONTH_NAMES = {\n",
-        "        1: 'January', 2: 'February', 3: 'March', 4: 'April',\n",
-        "        5: 'May', 6: 'June', 7: 'July', 8: 'August',\n",
-        "        9: 'September', 10: 'October', 11: 'November', 12: 'December'\n",
-        "    }\n",
-        "\n",
-        "    ############################################################################\n",
-        "    # 2) HELPER FUNCTIONS\n",
-        "    ############################################################################\n",
-        "    def haversine_distance(lat1, lon1, lat2, lon2):\n",
-        "        \"\"\" Great-circle distance in km between two lat/lon points. \"\"\"\n",
-        "        rlat1, rlon1, rlat2, rlon2 = map(radians, [lat1, lon1, lat2, lon2])\n",
-        "        dlon = rlon2 - rlon1\n",
-        "        dlat = rlat2 - rlat1\n",
-        "        a = sin(dlat / 2)**2 + cos(rlat1) * cos(rlat2) * sin(dlon / 2)**2\n",
-        "        c = 2 * asin(np.sqrt(a))\n",
-        "        return 6371 * c\n",
-        "\n",
-        "    def nearest_region(lat, lon):\n",
-        "        \"\"\" Return the weather region closest to lat/lon. \"\"\"\n",
-        "        min_dist = float('inf')\n",
-        "        candidate = None\n",
-        "        for region_name, (r_lat, r_lon) in REGION_COORDS.items():\n",
-        "            dist = haversine_distance(lat, lon, r_lat, r_lon)\n",
-        "            if dist < min_dist:\n",
-        "                min_dist = dist\n",
-        "                candidate = region_name\n",
-        "        return candidate\n",
-        "\n",
-        "    def load_weather_data():\n",
-        "        \"\"\"\n",
-        "        Load each region's CSV.\n",
-        "        Parse \"Date/Time (LST)\" → a DateTime, from which we get 'Date' & 'Hour'.\n",
-        "        \"\"\"\n",
-        "        region_dfs = {}\n",
-        "        for region_name, csv_path in WEATHER_FILES.items():\n",
-        "            try:\n",
-        "                df = pd.read_csv(csv_path)\n",
-        "                if \"Date/Time (LST)\" in df.columns:\n",
-        "                    df[\"DateTime\"] = pd.to_datetime(df[\"Date/Time (LST)\"], errors=\"coerce\")\n",
-        "                    df[\"Date\"] = df[\"DateTime\"].dt.date\n",
-        "                    df[\"Hour\"] = df[\"DateTime\"].dt.hour\n",
-        "                else:\n",
-        "                    # Possibly daily data or another format\n",
-        "                    if \"Date\" not in df.columns:\n",
-        "                        df[\"Date\"] = np.nan\n",
-        "                    if \"Hour\" not in df.columns:\n",
-        "                        df[\"Hour\"] = np.nan\n",
-        "\n",
-        "                region_dfs[region_name] = df\n",
-        "            except FileNotFoundError:\n",
-        "                print(f\"Warning: {csv_path} not found for region {region_name}.\")\n",
-        "                region_dfs[region_name] = pd.DataFrame()\n",
-        "        return region_dfs\n",
-        "\n",
-        "    def lookup_weather(region_name, trip_date, trip_hour, weather_data):\n",
-        "        \"\"\"\n",
-        "        Return (Temp (°C), Precip. Amount (mm)) from the matching row\n",
-        "        in the region's DataFrame, matched on date/hour (if hourly).\n",
-        "        \"\"\"\n",
-        "        df = weather_data.get(region_name, pd.DataFrame())\n",
-        "        if df.empty:\n",
-        "            return None, None\n",
-        "\n",
-        "        region_df = df[df[\"Date\"] == trip_date]\n",
-        "        if region_df.empty:\n",
-        "            return None, None\n",
-        "\n",
-        "        # If daily or no hour info, just first row of that date\n",
-        "        if region_name == \"TORONTO_NORTH_YORK\" or region_df[\"Hour\"].isnull().all():\n",
-        "            row = region_df.iloc[0]\n",
-        "            return row.get(\"Temp (°C)\", None), row.get(\"Precip. Amount (mm)\", None)\n",
-        "\n",
-        "        # Otherwise match the hour\n",
-        "        match_df = region_df[region_df[\"Hour\"] == float(trip_hour)]\n",
-        "        if not match_df.empty:\n",
-        "            row = match_df.iloc[0]\n",
-        "            return row.get(\"Temp (°C)\", None), row.get(\"Precip. Amount (mm)\", None)\n",
-        "        else:\n",
-        "            return None, None\n",
-        "\n",
-        "    ############################################################################\n",
-        "    # 3) MAIN SCRIPT\n",
-        "    ############################################################################\n",
-        "    # A) Read the historical trips\n",
-        "    trips = pd.read_csv(TRIPS_CSV)\n",
-        "\n",
-        "    # B) Parse times behind the scenes, but keep original \"Start Time\" format in the final\n",
-        "    parsed_start_times = pd.to_datetime(trips[\"Start Time\"], format=\"%m/%d/%Y %H:%M\")\n",
-        "    trips[\"Hour\"] = parsed_start_times.dt.hour\n",
-        "    trips[\"AM_PM\"] = trips[\"Hour\"].apply(lambda x: \"AM\" if x < 12 else \"PM\")\n",
-        "    trips[\"Month\"] = parsed_start_times.dt.month.map(MONTH_NAMES)\n",
-        "    trips[\"DayOfWeek\"] = parsed_start_times.dt.day_name()\n",
-        "    trips[\"Date\"] = parsed_start_times.dt.date  # for weather matching\n",
-        "\n",
-        "    # C) Read station info\n",
-        "    station_info_json = pd.read_json(STATION_INFO_JSON)\n",
-        "    station_info = pd.json_normalize(station_info_json[\"data\"][\"stations\"])\n",
-        "    station_info[\"station_id\"] = station_info[\"station_id\"].astype(int)\n",
-        "\n",
-        "    # D) Remove unnecessary columns **before merging** to speed up merges\n",
-        "    #    (We keep: station_id, lat, lon, capacity, is_charging_station, nearby_distance\n",
-        "    #     plus any other columns you explicitly want.)\n",
-        "    #    We'll drop the rest (like name, post_code, physical_configuration, cross_street, etc.)\n",
-        "\n",
-        "    columns_to_drop = [\n",
-        "        \"name\",\n",
-        "        \"physical_configuration\",\n",
-        "        \"altitude\",\n",
-        "        \"address\",\n",
-        "        \"rental_methods\",\n",
-        "        \"groups\",\n",
-        "        \"obcn\",\n",
-        "        \"short_name\",\n",
-        "        \"_ride_code_support\",\n",
-        "        \"post_code\",\n",
-        "        \"cross_street\"  # user wants it removed, if it exists\n",
-        "    ]\n",
-        "    # Drop them from station_info if present\n",
-        "    station_info.drop(columns=columns_to_drop, inplace=True, errors='ignore')\n",
-        "    # This leaves only the columns we didn't drop (like station_id, lat, lon, capacity, etc.)\n",
-        "\n",
-        "    # E) Merge trips + station info\n",
-        "    trips.rename(columns={\"Start Station Id\": \"station_id\"}, inplace=True)\n",
-        "    merged = pd.merge(\n",
-        "        trips,\n",
-        "        station_info,\n",
-        "        on=\"station_id\",\n",
-        "        how=\"left\",\n",
-        "        suffixes=(\"\", \"_station\")\n",
-        "    )\n",
-        "\n",
-        "    # F) Determine nearest weather region\n",
-        "    def find_region_for_row(row):\n",
-        "        lat = row[\"lat\"]\n",
-        "        lon = row[\"lon\"]\n",
-        "        if pd.isnull(lat) or pd.isnull(lon):\n",
-        "            return None\n",
-        "        return nearest_region(lat, lon)\n",
-        "\n",
-        "    merged[\"weather_region\"] = merged.apply(find_region_for_row, axis=1)\n",
-        "\n",
-        "    # G) Load weather data & row-by-row lookup\n",
-        "    all_weather_data = load_weather_data()\n",
-        "\n",
-        "    def find_weather_for_row(row):\n",
-        "        region = row[\"weather_region\"]\n",
-        "        date_ = row[\"Date\"]\n",
-        "        hour_ = row[\"Hour\"]\n",
-        "        if not region:\n",
-        "            return pd.Series([np.nan, np.nan])\n",
-        "        temp_val, precip_val = lookup_weather(region, date_, hour_, all_weather_data)\n",
-        "        return pd.Series([temp_val, precip_val])\n",
-        "\n",
-        "    merged[[\"Temp (°C)\", \"Precip. Amount (mm)\"]] = merged.progress_apply(find_weather_for_row, axis=1)\n",
-        "\n",
-        "    # H) Final Cleanup\n",
-        "    #    1) Rename \"Trip Duration\" to indicate it's in seconds\n",
-        "    if \"Trip  Duration\" in merged.columns:\n",
-        "        merged.rename(columns={\"Trip  Duration\": \"Trip Duration (seconds)\"}, inplace=True)\n",
-        "    elif \"Trip Duration\" in merged.columns:\n",
-        "        merged.rename(columns={\"Trip Duration\": \"Trip Duration (seconds)\"}, inplace=True)\n",
-        "\n",
-        "    #    2) Rename \"station_id\" back to \"Start Station Id\"\n",
-        "    merged.rename(columns={\"station_id\": \"Start Station Id\"}, inplace=True)\n",
-        "\n",
-        "    #    3) Drop columns the user doesn't want in the final\n",
-        "    #       \"Model\" (Bike model), \"Date\" (redundant), etc.\n",
-        "    #       We'll keep \"nearby_distance\" as requested.\n",
-        "    #       We already dropped a bunch from station_info,\n",
-        "    #       but let's remove from the merged if still present.\n",
-        "\n",
-        "    final_drops = [\n",
-        "        \"Model\",  # remove bike model\n",
-        "        \"Date\"    # redundant\n",
-        "    ]\n",
-        "    for col in final_drops:\n",
-        "        if col in merged.columns:\n",
-        "            merged.drop(columns=[col], inplace=True)\n",
-        "\n",
-        "    # I) Save final output\n",
-        "    merged.to_csv(\"merged_bikeshare_with_weather.csv\", index=False)\n",
-        "    print(\"Success! Created 'merged_bikeshare_with_weather.csv'. Unnecessary station info was removed prior to merging for efficiency.\")\n",
-        "# End of main()\n",
-        "\n",
-        "if __name__ == \"__main__\":\n",
-        "    main()"
-      ]
+
+    REGION_COORDS = {
+        "TORONTO_CITY": (43.6667, -79.4000),
+        "TORONTO_CITY_CENTRE": (43.6275, -79.3961),
+        "TORONTO_INTL_A": (43.6767, -79.6310),
+        "TORONTO_NORTH_YORK": (43.7800, -79.4678)
     }
-  ]
-}
+
+    # Convert numeric Month → word
+    MONTH_NAMES = {
+        1: 'January', 2: 'February', 3: 'March', 4: 'April',
+        5: 'May', 6: 'June', 7: 'July', 8: 'August',
+        9: 'September', 10: 'October', 11: 'November', 12: 'December'
+    }
+
+    ############################################################################
+    # 2) HELPER FUNCTIONS
+    ############################################################################
+    def haversine_distance(lat1, lon1, lat2, lon2):
+        """ Great-circle distance in km between two lat/lon points. """
+        rlat1, rlon1, rlat2, rlon2 = map(radians, [lat1, lon1, lat2, lon2])
+        dlon = rlon2 - rlon1
+        dlat = rlat2 - rlat1
+        a = sin(dlat / 2)**2 + cos(rlat1) * cos(rlat2) * sin(dlon / 2)**2
+        c = 2 * asin(np.sqrt(a))
+        return 6371 * c
+
+    def nearest_region(lat, lon):
+        """ Return the weather region closest to lat/lon. """
+        min_dist = float('inf')
+        candidate = None
+        for region_name, (r_lat, r_lon) in REGION_COORDS.items():
+            dist = haversine_distance(lat, lon, r_lat, r_lon)
+            if dist < min_dist:
+                min_dist = dist
+                candidate = region_name
+        return candidate
+
+    def load_weather_data():
+        """
+        Load each region's CSV.
+        Parse "Date/Time (LST)" → a DateTime, from which we get 'Date' & 'Hour'.
+        """
+        region_dfs = {}
+        for region_name, csv_path in WEATHER_FILES.items():
+            try:
+                df = pd.read_csv(csv_path)
+                if "Date/Time (LST)" in df.columns:
+                    df["DateTime"] = pd.to_datetime(df["Date/Time (LST)"], errors="coerce")
+                    df["Date"] = df["DateTime"].dt.date
+                    df["Hour"] = df["DateTime"].dt.hour
+                else:
+                    # Possibly daily data or another format
+                    if "Date" not in df.columns:
+                        df["Date"] = np.nan
+                    if "Hour" not in df.columns:
+                        df["Hour"] = np.nan
+
+                region_dfs[region_name] = df
+            except FileNotFoundError:
+                print(f"Warning: {csv_path} not found for region {region_name}.")
+                region_dfs[region_name] = pd.DataFrame()
+        return region_dfs
+
+    def lookup_weather(region_name, trip_date, trip_hour, weather_data):
+        """
+        Return (Temp (°C), Precip. Amount (mm)) from the matching row
+        in the region's DataFrame, matched on date/hour (if hourly).
+        """
+        df = weather_data.get(region_name, pd.DataFrame())
+        if df.empty:
+            return None, None
+
+        region_df = df[df["Date"] == trip_date]
+        if region_df.empty:
+            return None, None
+
+        # If daily or no hour info, just first row of that date
+        if region_name == "TORONTO_NORTH_YORK" or region_df["Hour"].isnull().all():
+            row = region_df.iloc[0]
+            return row.get("Temp (°C)", None), row.get("Precip. Amount (mm)", None)
+
+        # Otherwise match the hour
+        match_df = region_df[region_df["Hour"] == float(trip_hour)]
+        if not match_df.empty:
+            row = match_df.iloc[0]
+            return row.get("Temp (°C)", None), row.get("Precip. Amount (mm)", None)
+        else:
+            return None, None
+
+    ############################################################################
+    # 3) MAIN SCRIPT
+    ############################################################################
+    # A) Read the historical trips
+    trips = pd.read_csv(TRIPS_CSV)
+
+    # B) Parse times behind the scenes, but keep original "Start Time" format in the final
+    parsed_start_times = pd.to_datetime(trips["Start Time"], format="%m/%d/%Y %H:%M")
+    trips["Hour"] = parsed_start_times.dt.hour
+    trips["AM_PM"] = trips["Hour"].apply(lambda x: "AM" if x < 12 else "PM")
+    trips["Month"] = parsed_start_times.dt.month.map(MONTH_NAMES)
+    trips["DayOfWeek"] = parsed_start_times.dt.day_name()
+    trips["Date"] = parsed_start_times.dt.date  # for weather matching
+
+    # C) Read station info
+    station_info_json = pd.read_json(STATION_INFO_JSON)
+    station_info = pd.json_normalize(station_info_json["data"]["stations"])
+    station_info["station_id"] = station_info["station_id"].astype(int)
+
+    # D) Remove unnecessary columns **before merging** to speed up merges
+    #    (We keep: station_id, lat, lon, capacity, is_charging_station, nearby_distance
+    #     plus any other columns you explicitly want.)
+    #    We'll drop the rest (like name, post_code, physical_configuration, cross_street, etc.)
+
+    columns_to_drop = [
+        "name",
+        "physical_configuration",
+        "altitude",
+        "address",
+        "rental_methods",
+        "groups",
+        "obcn",
+        "short_name",
+        "_ride_code_support",
+        "post_code",
+        "cross_street"  # user wants it removed, if it exists
+    ]
+    # Drop them from station_info if present
+    station_info.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+    # This leaves only the columns we didn't drop (like station_id, lat, lon, capacity, etc.)
+
+    # E) Merge trips + station info
+    trips.rename(columns={"Start Station Id": "station_id"}, inplace=True)
+    merged = pd.merge(
+        trips,
+        station_info,
+        on="station_id",
+        how="left",
+        suffixes=("", "_station")
+    )
+
+    # F) Determine nearest weather region
+    def find_region_for_row(row):
+        lat = row["lat"]
+        lon = row["lon"]
+        if pd.isnull(lat) or pd.isnull(lon):
+            return None
+        return nearest_region(lat, lon)
+
+    merged["weather_region"] = merged.apply(find_region_for_row, axis=1)
+
+    # G) Load weather data & row-by-row lookup
+    all_weather_data = load_weather_data()
+
+    def find_weather_for_row(row):
+        region = row["weather_region"]
+        date_ = row["Date"]
+        hour_ = row["Hour"]
+        if not region:
+            return pd.Series([np.nan, np.nan])
+        temp_val, precip_val = lookup_weather(region, date_, hour_, all_weather_data)
+        return pd.Series([temp_val, precip_val])
+
+    merged[["Temp (°C)", "Precip. Amount (mm)"]] = merged.progress_apply(find_weather_for_row, axis=1)
+
+    # H) Final Cleanup
+    #    1) Rename "Trip Duration" to indicate it's in seconds
+    if "Trip  Duration" in merged.columns:
+        merged.rename(columns={"Trip  Duration": "Trip Duration (seconds)"}, inplace=True)
+    elif "Trip Duration" in merged.columns:
+        merged.rename(columns={"Trip Duration": "Trip Duration (seconds)"}, inplace=True)
+
+    #    2) Rename "station_id" back to "Start Station Id"
+    merged.rename(columns={"station_id": "Start Station Id"}, inplace=True)
+
+    #    3) Drop columns the user doesn't want in the final
+    #       "Model" (Bike model), "Date" (redundant), etc.
+    #       We'll keep "nearby_distance" as requested.
+    #       We already dropped a bunch from station_info,
+    #       but let's remove from the merged if still present.
+
+    final_drops = [
+        "Model",  # remove bike model
+        "Date"    # redundant
+    ]
+    for col in final_drops:
+        if col in merged.columns:
+            merged.drop(columns=[col], inplace=True)
+
+    # I) Save final output
+    merged.to_csv("merged_bikeshare_with_weather.csv", index=False)
+    print("Success! Created 'merged_bikeshare_with_weather.csv'. Unnecessary station info was removed prior to merging for efficiency.")
+# End of main()
+
+if __name__ == "__main__":
+    main()
